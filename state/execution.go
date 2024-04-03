@@ -205,6 +205,17 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	state State, blockID types.BlockID, block *types.Block,
 ) (State, error) {
 
+	// Lock the mempool.
+	// locks the mempool, which effectively locks the mempool for BeginBlock,
+	// DeliverTx, EndBlock, and Commit.
+	blockExec.mempool.Lock()
+	defer blockExec.mempool.Unlock()
+
+	if err := blockExec.mempool.FlushAppConn(); err != nil {
+		blockExec.logger.Error("client error during mempool.FlushAppConn", "err", err)
+		return state, err
+	}
+
 	if err := validateBlock(state, block); err != nil {
 		return state, ErrInvalidBlock(err)
 	}
@@ -378,16 +389,6 @@ func (blockExec *BlockExecutor) Commit(
 	block *types.Block,
 	abciResponse *abci.ResponseFinalizeBlock,
 ) (int64, error) {
-	blockExec.mempool.Lock()
-	defer blockExec.mempool.Unlock()
-
-	// while mempool is Locked, flush to ensure all async requests have completed
-	// in the ABCI app before Commit.
-	err := blockExec.mempool.FlushAppConn()
-	if err != nil {
-		blockExec.logger.Error("client error during mempool.FlushAppConn", "err", err)
-		return 0, err
-	}
 
 	// Commit block, get hash back
 	res, err := blockExec.proxyApp.Commit(context.TODO())
